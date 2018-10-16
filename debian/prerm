@@ -1,0 +1,7 @@
+#!/bin/sh
+
+# Exit on error
+set -e
+
+systemctl stop indoor_sensors.service
+systemctl disable indoor_sensors.service

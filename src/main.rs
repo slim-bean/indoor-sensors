@@ -34,7 +34,7 @@ fn main() {
     info!("Starting indoor_sensors");
 
     info!("Loading sensors YAML file");
-    let sensors = load_from_file("sensors.yml");
+    let sensors = load_from_file("/etc/indoor_sensors/sensors.yml");
 
     info!("Opening I2C device");
     let dev = I2cdev::new("/dev/i2c-1").unwrap();

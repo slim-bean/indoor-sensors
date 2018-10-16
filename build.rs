@@ -3,7 +3,7 @@ use std::env;
 
 fn main(){
     let target = env::var("TARGET").unwrap();
-    if target.contains("armv7") {
+    if target.contains("arm") {
         println!("cargo:rustc-link-lib=dylib=mosquitto");
         println!("cargo:rustc-link-lib=dylib=crypto");
         println!("cargo:rustc-link-lib=dylib=ssl");

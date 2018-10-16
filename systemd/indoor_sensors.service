@@ -1,0 +1,14 @@
+[Unit]
+Description=Reads indoor sensors located on primary home auto Pi
+After=network.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/indoor_sensors
+WorkingDirectory=/var/log/indoor_sensors/
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
