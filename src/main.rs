@@ -27,7 +27,9 @@ use std::time::Duration;
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-use sensor_lib::{SensorDefinition, SensorValue, load_from_file};
+use sensor_lib::{SensorDefinition, SensorValue, TempHumidityValue, load_from_file};
+
+use mosquitto_client::Mosquitto;
 
 fn main() {
     setup_logger().unwrap();
@@ -61,7 +63,7 @@ fn main() {
             value: String::from(flt_as_string),
         };
 
-        for queue in &sensors.get(&50u16).unwrap().destination_queues {
+        for queue in &sensors.get(&50i16).unwrap().destination_queues {
             match serde_json::to_string(&temp_val) {
                 Ok(val) => {
                     match m.publish_wait(&queue, val.as_bytes(), 2, false, 1000) {
@@ -90,7 +92,7 @@ fn main() {
             value: String::from(flt_as_string),
         };
 
-        for queue in &sensors.get(&51u16).unwrap().destination_queues {
+        for queue in &sensors.get(&51i16).unwrap().destination_queues {
             match serde_json::to_string(&temp_val) {
                 Ok(val) => {
                     match m.publish_wait(&queue, val.as_bytes(), 2, false, 1000) {
@@ -109,11 +111,49 @@ fn main() {
 
         }
 
+        let temp_humidity = TempHumidityValue{
+            timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64,
+            location: 2,
+            temp: temp,
+            humidity: humidity,
+        };
+
+        match serde_json::to_string(&temp_humidity) {
+            Ok(val) => {
+                send_to_topic(&m, "/ws/2/grp/temp_humidity", val.as_bytes());
+            },
+            Err(err) => {
+                error!("Failed to serialize the temp_humidity value: {}", err);
+            },
+        }
+
+
+
         info!("Temp: {}, Humidity: {}", temp, humidity);
         thread::sleep(Duration::from_secs(60));
     }
 
 
+}
+
+fn send_to_topic(m: &Mosquitto, topic: &str, payload: &[u8]) {
+    for i in 1..5 {
+        match m.publish_wait(topic, payload, 2, false, 1000) {
+            Ok(id) => {
+                debug!("Message {} published successfully to {} after {} attempts", id, topic, i);
+                if i > 1 {
+                    info!("Message {} published successfully to {} after {} attempts", id, topic, i);
+                }
+                break;
+            }
+            Err(e) => {
+                warn!("Failed to enqueue data: {} to topic {}, will retry {} more times", e, topic, 5 - i);
+                if i == 5 {
+                    error!("Failed to enqueue message after 5 tries to topic {}, it will be dropped", topic);
+                }
+            }
+        };
+    }
 }
 
 fn setup_logger() -> Result<(), fern::InitError> {
