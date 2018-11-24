@@ -16,18 +16,19 @@ extern crate serde_json;
 extern crate dtoa;
 
 extern crate htu21d;
+extern crate sgp30;
 extern crate sensor_lib;
 
 use linux_hal::{I2cdev, Delay};
 use htu21d::HTU21D;
+use sgp30::{Sgp30, Measurement, Humidity};
 
 use std::thread;
 use std::time::Duration;
 
-use std::collections::HashMap;
 use std::time::SystemTime;
 
-use sensor_lib::{SensorDefinition, SensorValue, TempHumidityValue, load_from_file};
+use sensor_lib::{SensorValue, TempHumidityValue, load_from_file};
 
 use mosquitto_client::Mosquitto;
 
@@ -45,95 +46,143 @@ fn main() {
     let mut htu21d = HTU21D::new(dev, Delay);
     htu21d.reset().unwrap();
 
+
+    info!("Create and reset SGP30");
+    let dev2 = I2cdev::new("/dev/i2c-1").unwrap();
+    let address = 0x58;
+    let mut sgp = Sgp30::new(dev2, address, Delay);
+    sgp.init().unwrap();
+
+
     info!("Connecting to MQ");
     let m = mosquitto_client::Mosquitto::new("indoor_sensors");
     m.connect("localhost", 1883).unwrap();
+    let mut counter = 0;
 
     loop {
-        let temp = (htu21d.read_temperature().unwrap() * 1.8) + 32f32;
-        let humidity = htu21d.read_humidity().unwrap();
 
-        let mut buf = [b'\0'; 30];
-        let len = dtoa::write(&mut buf[..], temp).unwrap();
-        let flt_as_string = std::str::from_utf8(&buf[..len]).unwrap();
 
-        let temp_val = SensorValue{
-            id: 50,
-            timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64,
-            value: String::from(flt_as_string),
-        };
+        // The driver for the SGP30 says we have to call the measure() function once a second
+        // for the dynamic baseline to work properly, the main loop runs on a one sec delay
+        // but we don't really need one sec resolution on this sensor, so we call the measure function
+        // but usually ignore the result.
 
-        for queue in &sensors.get(&50i16).unwrap().destination_queues {
-            match serde_json::to_string(&temp_val) {
-                Ok(val) => {
-                    match m.publish_wait(&queue, val.as_bytes(), 2, false, 1000) {
-                        Ok(id) => {
-                            debug!("Message {} published succesfully", id)
-                        }
-                        Err(e) => {
-                            error!("Failed to enqueue data, message will be dropped: {}", e)
-                        }
+        let measurement: Measurement = sgp.measure().unwrap();
+        debug!("CO₂eq parts per million: {}", measurement.co2eq_ppm);
+        debug!("TVOC parts per billion: {}", measurement.tvoc_ppb);
+
+
+        //Send values once a minute
+        if counter > 60 {
+            let temp = (htu21d.read_temperature().unwrap() * 1.8) + 32f32;
+            let humidity = htu21d.read_humidity().unwrap();
+
+            //Set the humidity value in the SGP30
+            //FIXME need to convert relative humidity to absolute humidity
+//            let sgp30_humidity = Humidity::from_f32(humidity.clone()).unwrap();
+//            sgp.set_humidity(Some(&sgp30_humidity)).unwrap();
+
+            let mut buf = [b'\0'; 30];
+            let len = dtoa::write(&mut buf[..], temp).unwrap();
+            let flt_as_string = std::str::from_utf8(&buf[..len]).unwrap();
+
+            let temp_val = SensorValue {
+                id: 50,
+                timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64,
+                value: String::from(flt_as_string),
+            };
+
+            for queue in &sensors.get(&50i16).unwrap().destination_queues {
+                match serde_json::to_string(&temp_val) {
+                    Ok(val) => {
+                        send_to_topic(&m, &queue, val.as_bytes());
                     }
-                },
-                Err(err) => {
-                    error!("Failed to serialize the sensor value: {}", err);
-                },
-            }
-
-        }
-
-        let mut buf = [b'\0'; 30];
-        let len = dtoa::write(&mut buf[..], humidity).unwrap();
-        let flt_as_string = std::str::from_utf8(&buf[..len]).unwrap();
-
-        let temp_val = SensorValue{
-            id: 51,
-            timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64,
-            value: String::from(flt_as_string),
-        };
-
-        for queue in &sensors.get(&51i16).unwrap().destination_queues {
-            match serde_json::to_string(&temp_val) {
-                Ok(val) => {
-                    match m.publish_wait(&queue, val.as_bytes(), 2, false, 1000) {
-                        Ok(id) => {
-                            debug!("Message {} published succesfully", id)
-                        }
-                        Err(e) => {
-                            error!("Failed to enqueue data, message will be dropped: {}", e)
-                        }
+                    Err(err) => {
+                        error!("Failed to serialize the sensor value: {}", err);
                     }
-                },
+                };
+            };
+
+            let mut buf = [b'\0'; 30];
+            let len = dtoa::write(&mut buf[..], humidity).unwrap();
+            let flt_as_string = std::str::from_utf8(&buf[..len]).unwrap();
+
+            let temp_val = SensorValue {
+                id: 51,
+                timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64,
+                value: String::from(flt_as_string),
+            };
+
+            for queue in &sensors.get(&51i16).unwrap().destination_queues {
+                match serde_json::to_string(&temp_val) {
+                    Ok(val) => {
+                        send_to_topic(&m, &queue, val.as_bytes());
+                    }
+                    Err(err) => {
+                        error!("Failed to serialize the sensor value: {}", err);
+                    }
+                };
+            };
+
+
+            let temp_val = SensorValue {
+                id: 52,
+                timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64,
+                value: measurement.co2eq_ppm.to_string(),
+            };
+
+            for queue in &sensors.get(&52i16).unwrap().destination_queues {
+                match serde_json::to_string(&temp_val) {
+                    Ok(val) => {
+                        send_to_topic(&m, &queue, val.as_bytes());
+                    }
+                    Err(err) => {
+                        error!("Failed to serialize the sensor value: {}", err);
+                    }
+                };
+            };
+
+            let temp_val = SensorValue {
+                id: 53,
+                timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64,
+                value: measurement.tvoc_ppb.to_string(),
+            };
+
+            for queue in &sensors.get(&53i16).unwrap().destination_queues {
+                match serde_json::to_string(&temp_val) {
+                    Ok(val) => {
+                        send_to_topic(&m, &queue, val.as_bytes());
+                    }
+                    Err(err) => {
+                        error!("Failed to serialize the sensor value: {}", err);
+                    }
+                };
+            };
+
+
+            let temp_humidity = TempHumidityValue {
+                timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64,
+                location: 2,
+                temp: temp,
+                humidity: humidity,
+            };
+
+            match serde_json::to_string(&temp_humidity) {
+                Ok(val) => {
+                    send_to_topic(&m, "/ws/2/grp/temp_humidity", val.as_bytes());
+                }
                 Err(err) => {
-                    error!("Failed to serialize the sensor value: {}", err);
-                },
-            }
+                    error!("Failed to serialize the temp_humidity value: {}", err);
+                }
+            };
 
+            counter = 0;
+            info!("Temp: {}, Humidity: {}", temp, humidity);
         }
-
-        let temp_humidity = TempHumidityValue{
-            timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64,
-            location: 2,
-            temp: temp,
-            humidity: humidity,
-        };
-
-        match serde_json::to_string(&temp_humidity) {
-            Ok(val) => {
-                send_to_topic(&m, "/ws/2/grp/temp_humidity", val.as_bytes());
-            },
-            Err(err) => {
-                error!("Failed to serialize the temp_humidity value: {}", err);
-            },
-        }
-
-
-
-        info!("Temp: {}, Humidity: {}", temp, humidity);
-        thread::sleep(Duration::from_secs(60));
+        //See above, this timing is important for the SGP30
+        thread::sleep(Duration::from_millis(1000));
+        counter = counter + 1;
     }
-
-
 }
 
 fn send_to_topic(m: &Mosquitto, topic: &str, payload: &[u8]) {
