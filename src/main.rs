@@ -17,11 +17,13 @@ extern crate dtoa;
 
 extern crate htu21d;
 extern crate sgp30;
+extern crate bme280;
 extern crate sensor_lib;
 
 use linux_hal::{I2cdev, Delay};
 use htu21d::HTU21D;
 use sgp30::{Sgp30, Measurement, Humidity};
+use bme280::BME280;
 
 use std::thread;
 use std::time::Duration;
@@ -46,12 +48,19 @@ fn main() {
     let mut htu21d = HTU21D::new(dev, Delay);
     htu21d.reset().unwrap();
 
-
     info!("Create and reset SGP30");
     let dev2 = I2cdev::new("/dev/i2c-1").unwrap();
     let address = 0x58;
     let mut sgp = Sgp30::new(dev2, address, Delay);
     sgp.init().unwrap();
+
+    info!("Create and init BMP280");
+    // using Linux I2C Bus #1 in this example
+    let dev3 = I2cdev::new("/dev/i2c-1").unwrap();
+    //This "secondary" address is really the primary there is a little bit of a screw-up somewhere with this lib
+    let mut bme280 = BME280::new_secondary(dev3, Delay);
+    bme280.init().unwrap();
+
 
 
     info!("Connecting to MQ");
@@ -124,6 +133,22 @@ fn main() {
                 };
             };
 
+            let temp_humidity = TempHumidityValue {
+                timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64,
+                location: 2,
+                temp: temp,
+                humidity: humidity,
+            };
+
+            match serde_json::to_string(&temp_humidity) {
+                Ok(val) => {
+                    send_to_topic(&m, "/ws/2/grp/temp_humidity", val.as_bytes());
+                }
+                Err(err) => {
+                    error!("Failed to serialize the temp_humidity value: {}", err);
+                }
+            };
+
 
             let temp_val = SensorValue {
                 id: 52,
@@ -159,25 +184,35 @@ fn main() {
                 };
             };
 
+            let measurements = bme280.measure().unwrap();
+            let mut buf = [b'\0'; 30];
+            //Convert to inches of mercury before sending
+            let len = dtoa::write(&mut buf[..], measurements.pressure/3386.389).unwrap();
+            let flt_as_string = std::str::from_utf8(&buf[..len]).unwrap();
 
-            let temp_humidity = TempHumidityValue {
+            let temp_val = SensorValue {
+                id: 54,
                 timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64,
-                location: 2,
-                temp: temp,
-                humidity: humidity,
+                value: String::from(flt_as_string),
             };
 
-            match serde_json::to_string(&temp_humidity) {
-                Ok(val) => {
-                    send_to_topic(&m, "/ws/2/grp/temp_humidity", val.as_bytes());
-                }
-                Err(err) => {
-                    error!("Failed to serialize the temp_humidity value: {}", err);
-                }
+            for queue in &sensors.get(&54i16).unwrap().destination_queues {
+                match serde_json::to_string(&temp_val) {
+                    Ok(val) => {
+                        send_to_topic(&m, &queue, val.as_bytes());
+                    }
+                    Err(err) => {
+                        error!("Failed to serialize the sensor value: {}", err);
+                    }
+                };
             };
+
 
             counter = 0;
             info!("Temp: {}, Humidity: {}", temp, humidity);
+            info!("Temp: {}, Pressure: {}", ((measurements.temperature * 1.8) + 32.0), measurements.pressure/3386.389);
+            info!("CO₂eq parts per million: {}", measurement.co2eq_ppm);
+            info!("TVOC parts per billion: {}", measurement.tvoc_ppb);
         }
         //See above, this timing is important for the SGP30
         thread::sleep(Duration::from_millis(1000));
