@@ -30,6 +30,8 @@ use std::time::Duration;
 
 use std::time::SystemTime;
 
+use std::f64::consts::E;
+
 use sensor_lib::{SensorValue, TempHumidityValue, load_from_file};
 
 use mosquitto_client::Mosquitto;
@@ -83,16 +85,18 @@ fn main() {
 
         //Send values once a minute
         if counter > 60 {
-            let temp = (htu21d.read_temperature().unwrap() * 1.8) + 32f32;
+            let temp = htu21d.read_temperature().unwrap();
+            let temp_f = temp as f32 * 1.8 + 32.0;
             let humidity = htu21d.read_humidity().unwrap();
 
             //Set the humidity value in the SGP30
-            //FIXME need to convert relative humidity to absolute humidity
-//            let sgp30_humidity = Humidity::from_f32(humidity.clone()).unwrap();
-//            sgp.set_humidity(Some(&sgp30_humidity)).unwrap();
+            //This equation for absolute humidity comes from: https://carnotcycle.wordpress.com/2012/08/04/how-to-convert-relative-humidity-to-absolute-humidity/
+            let abs_humidity = (6.112 * E.powf(((17.67 * temp)/(temp+243.5)) as f64) as f32 * humidity * 2.1674) as f32 /(273.15+temp);
+            let sgp30_humidity = Humidity::from_f32(abs_humidity).unwrap();
+            sgp.set_humidity(Some(&sgp30_humidity)).unwrap();
 
             let mut buf = [b'\0'; 30];
-            let len = dtoa::write(&mut buf[..], temp).unwrap();
+            let len = dtoa::write(&mut buf[..], temp_f).unwrap();
             let flt_as_string = std::str::from_utf8(&buf[..len]).unwrap();
 
             let temp_val = SensorValue {
@@ -136,7 +140,7 @@ fn main() {
             let temp_humidity = TempHumidityValue {
                 timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64,
                 location: 2,
-                temp: temp,
+                temp: temp_f,
                 humidity: humidity,
             };
 
@@ -209,7 +213,7 @@ fn main() {
 
 
             counter = 0;
-            info!("Temp: {}, Humidity: {}", temp, humidity);
+            info!("Temp: {}, Humidity: {}, Abs Humidity: {}", temp_f, humidity, abs_humidity);
             info!("Temp: {}, Pressure: {}", ((measurements.temperature * 1.8) + 32.0), measurements.pressure/3386.389);
             info!("CO₂eq parts per million: {}", measurement.co2eq_ppm);
             info!("TVOC parts per billion: {}", measurement.tvoc_ppb);
