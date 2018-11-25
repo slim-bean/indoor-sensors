@@ -20,6 +20,9 @@ extern crate sgp30;
 extern crate bme280;
 extern crate sensor_lib;
 
+extern crate serial;
+use serial::prelude::*;
+
 use linux_hal::{I2cdev, Delay};
 use htu21d::HTU21D;
 use sgp30::{Sgp30, Measurement, Humidity};
@@ -27,6 +30,8 @@ use bme280::BME280;
 
 use std::thread;
 use std::time::Duration;
+use std::path::Path;
+use std::io::prelude::*;
 
 use std::time::SystemTime;
 
@@ -63,12 +68,25 @@ fn main() {
     let mut bme280 = BME280::new_secondary(dev3, Delay);
     bme280.init().unwrap();
 
+    info!("Setup radiation monitor serial port");
+    let mut rad_port = serial::unix::TTYPort::open(Path::new("/dev/ttyUSB0")).unwrap();
+    let settings = serial::PortSettings {
+        baud_rate:    serial::Baud9600,
+        char_size:    serial::Bits8,
+        parity:       serial::ParityNone,
+        stop_bits:    serial::Stop1,
+        flow_control: serial::FlowNone,
+    };
+    rad_port.configure(&settings).unwrap();
+    rad_port.set_timeout(Duration::from_millis(100)).unwrap();
 
 
     info!("Connecting to MQ");
     let m = mosquitto_client::Mosquitto::new("indoor_sensors");
     m.connect("localhost", 1883).unwrap();
     let mut counter = 0;
+    //TODO do we want to average this over the minute instead of taking the instantaneous reading?
+    let mut cpm = 0u16;
 
     loop {
 
@@ -83,8 +101,47 @@ fn main() {
         debug!("TVOC parts per billion: {}", measurement.tvoc_ppb);
 
 
+        //We also read the serial port for the radiation sensor every second because that's the rate it outputs and this will keep our value current
+        let mut buf: Vec<u8> = (0..255).collect();
+        match rad_port.read(&mut buf[..]) {
+            Ok(t) => {
+                let data = String::from_utf8_lossy(&buf[..t]);
+                let split_data: Vec<&str> = data.split(',').collect();
+                if split_data.len() >= 4 {
+                    match split_data.get(3) {
+                        Some(cpm_string) => {
+                            match cpm_string.trim().parse::<u16>(){
+                                Ok(cpm_incoming) => {
+                                    cpm = cpm_incoming;
+                                },
+                                Err(err) => {
+                                    error!("Failed to parse CPM value as integer: {}", err);
+                                }
+
+                            }
+                        },
+                        None => {
+                            error!("Failed to get the third index from the rad sensor data");
+                        },
+                    }
+
+                }
+                debug!("Received from radiation serial port: '{}', split: '{:?}'", data, split_data);
+            }
+            Err(e) => {
+                warn!("Failed to read from serial port: {}", e);
+            }
+        }
+
+
         //Send values once a minute
         if counter > 60 {
+
+
+            //////////////////////////
+            // TEMP AND HUMIDITY
+            //////////////////////////
+
             let temp = htu21d.read_temperature().unwrap();
             let temp_f = temp as f32 * 1.8 + 32.0;
             let humidity = htu21d.read_humidity().unwrap();
@@ -154,6 +211,11 @@ fn main() {
             };
 
 
+
+            //////////////////////////
+            // CO2 and VOC
+            //////////////////////////
+
             let temp_val = SensorValue {
                 id: 52,
                 timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64,
@@ -188,6 +250,10 @@ fn main() {
                 };
             };
 
+            //////////////////////////
+            // AIR PRESSURE
+            //////////////////////////
+
             let measurements = bme280.measure().unwrap();
             let mut buf = [b'\0'; 30];
             //Convert to inches of mercury before sending
@@ -212,12 +278,38 @@ fn main() {
             };
 
 
+            //////////////////////////
+            // RADIATION
+            //////////////////////////
+            let temp_val = SensorValue {
+                id: 55,
+                timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64,
+                value: cpm.to_string(),
+            };
+
+            for queue in &sensors.get(&55i16).unwrap().destination_queues {
+                match serde_json::to_string(&temp_val) {
+                    Ok(val) => {
+                        send_to_topic(&m, &queue, val.as_bytes());
+                    }
+                    Err(err) => {
+                        error!("Failed to serialize the sensor value: {}", err);
+                    }
+                };
+            };
+
+
+
+
+
             counter = 0;
             info!("Temp: {}, Humidity: {}, Abs Humidity: {}", temp_f, humidity, abs_humidity);
             info!("Temp: {}, Pressure: {}", ((measurements.temperature * 1.8) + 32.0), measurements.pressure/3386.389);
             info!("CO₂eq parts per million: {}", measurement.co2eq_ppm);
             info!("TVOC parts per billion: {}", measurement.tvoc_ppb);
+            info!("Radiation CPM: {}", cpm);
         }
+
         //See above, this timing is important for the SGP30
         thread::sleep(Duration::from_millis(1000));
         counter = counter + 1;
