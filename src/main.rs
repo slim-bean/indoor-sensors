@@ -37,7 +37,7 @@ use std::time::SystemTime;
 
 use std::f64::consts::E;
 
-use sensor_lib::{SensorValue, TempHumidityValue, load_from_file};
+use sensor_lib::{SensorValue, TempHumidityValue, AirParticulateValue, load_from_file};
 
 use mosquitto_client::Mosquitto;
 
@@ -79,6 +79,26 @@ fn main() {
     };
     rad_port.configure(&settings).unwrap();
     rad_port.set_timeout(Duration::from_millis(100)).unwrap();
+
+    info!("Setup air quality monitor serial port");
+    let mut air_port = serial::unix::TTYPort::open(Path::new("/dev/serial0")).unwrap();
+    let settings = serial::PortSettings {
+        baud_rate:    serial::Baud9600,
+        char_size:    serial::Bits8,
+        parity:       serial::ParityNone,
+        stop_bits:    serial::Stop1,
+        flow_control: serial::FlowNone,
+    };
+    air_port.configure(&settings).unwrap();
+    air_port.set_timeout(Duration::from_millis(250)).unwrap();
+
+    info!("Changing air monitor to query only mode");
+    let cmd = [0xAAu8, 0xB4, 0x02, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x02, 0xAB];
+    air_port.write(&cmd).unwrap();
+    let mut buf: Vec<u8> = (0..50).collect();
+    air_port.read(&mut buf[..]).unwrap();
+    info!("Received {:?}", buf);
+
 
 
     info!("Connecting to MQ");
@@ -130,6 +150,44 @@ fn main() {
             }
             Err(e) => {
                 warn!("Failed to read from serial port: {}", e);
+            }
+        }
+
+        //Send the command to query data
+        let cmd = [0xAAu8, 0xB4, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x02, 0xAB];
+        air_port.write(&cmd).unwrap();
+        //Read the response
+        let mut buf: Vec<u8> = (0..20).collect();
+        match air_port.read(&mut buf[..]) {
+            Ok(t) => {
+                if t == 10 {
+                    let pm2_5 = ((buf[3] as i16) << 8) + ((buf[2] as i16) << 0);
+                    let pm10 = ((buf[5] as i16) << 8) + ((buf[4] as i16) << 0);
+                    info!("PM2.5: {}, PM10: {}", pm2_5, pm10);
+
+                    let air_part_val = AirParticulateValue{
+                        timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64,
+                        location: 2,
+                        pm2_5,
+                        pm10
+                    };
+
+                    match serde_json::to_string(&air_part_val) {
+                        Ok(val) => {
+                            send_to_topic(&m, "/ws/2/grp/air_particulate", val.as_bytes());
+                        }
+                        Err(err) => {
+                            error!("Failed to serialize the temp_humidity value: {}", err);
+                        }
+                    };
+
+                } else {
+                    warn!("Packet from air sensor was incorrect length: {:?}", buf);
+                }
+                debug!("Received from air sensor: '{:?}'", buf);
+            }
+            Err(e) => {
+                warn!("Failed to read from air sensor serial port: {}", e);
             }
         }
 
