@@ -50,10 +50,11 @@ pub struct Htu21d {
     sender: Sender<Payload>,
     lock: Arc<Mutex<i32>>,
     htu21d: HTU21D<I2cdev, Delay>,
+    humidity_mutex: Arc<Mutex<(f32,f32)>>,
 }
 
 impl Htu21d {
-    pub fn new(sender: Sender<Payload>, lock: Arc<Mutex<i32>>) -> Result<Htu21d, Error> {
+    pub fn new(sender: Sender<Payload>, lock: Arc<Mutex<i32>>, humidity_mutex: Arc<Mutex<(f32,f32)>>) -> Result<Htu21d, Error> {
         info!("Create and Init HTU21Df");
         let dev = I2cdev::new("/dev/i2c-1")?;
         let mut htu21d = HTU21D::new(dev, Delay);
@@ -62,7 +63,8 @@ impl Htu21d {
         Ok(Htu21d{
             sender,
             lock,
-            htu21d
+            htu21d,
+            humidity_mutex
         })
     }
 
@@ -108,21 +110,30 @@ impl Htu21d {
                     },
                 }
 
-                if temp.is_some() && humidity.is_some() {
-                    let temp_f = temp.unwrap() as f32 * 1.8 + 32.0;
+                if let (Some(temp_val), Some(hum_val)) = (temp, humidity){
 
-                    //Set the humidity value in the SGP30
-                    //This equation for absolute humidity comes from: https://carnotcycle.wordpress.com/2012/08/04/how-to-convert-relative-humidity-to-absolute-humidity/
-//                let abs_humidity = (6.112 * E.powf(((17.67 * temp)/(temp+243.5)) as f64) as f32 * humidity * 2.1674) as f32 /(273.15+temp);
-//                let sgp30_humidity = Humidity::from_f32(abs_humidity).unwrap();
-//                sgp.set_humidity(Some(&sgp30_humidity)).unwrap();
+                    //Update the humidity mutex for the sgp30 to use
+                    match htu.humidity_mutex.lock(){
+                        Ok(mut mut_val) => {
+                            *mut_val = (temp_val, hum_val);
+                        },
+                        Err(_) => {
+                            error!("The lock has been poisoned, sending a poison message to kill the app");
+                            htu.sender.send(Payload{
+                                queue: String::from("poison"),
+                                bytes: String::from("poison")
+                            }).unwrap(); //We don't really care anymore if this thread panics
+                        },
+                    }
+
+                    let temp_f = temp_val as f32 * 1.8 + 32.0;
 
 
                     let temp_humidity = TempHumidityValue {
                         timestamp: SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as u64,
                         location: 2,
                         temp: temp_f,
-                        humidity: humidity.unwrap(),
+                        humidity: hum_val,
                     };
 
                     match serde_json::to_string(&temp_humidity) {

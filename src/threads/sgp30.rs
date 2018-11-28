@@ -5,6 +5,8 @@ use std::sync::{Arc,Mutex};
 use std::thread;
 use std::time::SystemTime;
 use std::time::Duration;
+use std::f64::consts::E;
+use std::f32::NAN;
 
 use Payload;
 use sensor_lib::SensorValue;
@@ -59,10 +61,11 @@ pub struct Sgp30 {
     sender: Sender<Payload>,
     lock: Arc<Mutex<i32>>,
     sgp30: Sgp<I2cdev, Delay>,
+    humidity_mutex: Arc<Mutex<(f32,f32)>>,
 }
 
 impl Sgp30 {
-    pub fn new(sender: Sender<Payload>, lock: Arc<Mutex<i32>>) -> Result<Sgp30, Error> {
+    pub fn new(sender: Sender<Payload>, lock: Arc<Mutex<i32>>, humidity_mutex: Arc<Mutex<(f32,f32)>>,) -> Result<Sgp30, Error> {
         info!("Create and Init SGP30");
         let dev2 = I2cdev::new("/dev/i2c-1")?;
         let address = 0x58;
@@ -71,7 +74,8 @@ impl Sgp30 {
         Ok(Sgp30{
             sender,
             lock,
-            sgp30
+            sgp30,
+            humidity_mutex,
         })
     }
 
@@ -172,6 +176,48 @@ impl Sgp30 {
                         None => {},
                     }
                     counter = 0;
+                    //Update the humidity value for the next set of readings:
+                    //This equation for absolute humidity comes from: https://carnotcycle.wordpress.com/2012/08/04/how-to-convert-relative-humidity-to-absolute-humidity/
+                    let mut temp = NAN;
+                    let mut humidity = NAN;
+                    match sgp.humidity_mutex.lock(){
+                        Ok(mut_val) => {
+                            temp = mut_val.0;
+                            humidity = mut_val.1;
+                        },
+                        Err(_) => {},
+                    }
+
+                    if !temp.is_nan() && !humidity.is_nan() {
+                        let abs_humidity = (6.112 * E.powf(((17.67 * temp)/(temp+243.5)) as f64) as f32 * humidity * 2.1674) as f32 /(273.15+temp);
+                         match Humidity::from_f32(abs_humidity){
+                             Ok(sgp30_humidity) => {
+                                 match sgp.lock.lock() {
+                                     Ok(_) => {
+                                         match sgp.sgp30.set_humidity(Some(&sgp30_humidity)) {
+                                             Ok(_) => {
+                                                 debug!("Set SGP abs humidity to: {} from a temp val of {} and humidity val of {}", abs_humidity, temp, humidity);
+                                             },
+                                             Err(err) => {
+                                                 error!("Failed to update the humidity value of the sgp30: {:?}", err);
+                                             },
+                                         }
+                                     },
+                                     Err(_) => {
+                                         //I'm ignoring this lock failure because we will catch it above if the lock is poisoned
+                                     },
+                                 }
+                             },
+                             Err(err) => {
+                                 error!("Failed to create a humidity value for SGP30: {:?}", err);
+                             },
+                         }
+
+
+                    }
+
+
+
                 }
                 counter = counter + 1;
             }

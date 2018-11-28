@@ -23,8 +23,7 @@ extern crate serial;
 
 use std::sync::{Arc,Mutex};
 use std::sync::mpsc;
-
-use std::f64::consts::E;
+use std::f32::NAN;
 
 use mosquitto_client::Mosquitto;
 
@@ -51,8 +50,10 @@ fn main() {
 
     //FIXME instead of unrwapping all of these we could check for errors so the progam can run missing a sensor
     let bmp280 = Bmp280::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex)).unwrap();
-    let htu21d = Htu21d::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex)).unwrap();
-    let sgp30 = Sgp30::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex)).unwrap();
+
+    let humidity_mutex = Arc::new(Mutex::new((NAN,NAN)));
+    let htu21d = Htu21d::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex), Arc::clone(&humidity_mutex)).unwrap();
+    let sgp30 = Sgp30::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex), Arc::clone(&humidity_mutex)).unwrap();
     let geiger = Geiger::new(mpsc::Sender::clone(&sender)).unwrap();
     let sds011 = Sds011::new(mpsc::Sender::clone(&sender)).unwrap();
 
@@ -62,7 +63,6 @@ fn main() {
     Geiger::start_thread(geiger);
     Sds011::start_thread(sds011);
 
-    //TODO Send humidity from htu21 over to sgp30
     //TODO Average values in SGP30
     //TODO Save baseline from SGP30
     //TODO Average temp/humidity values?
