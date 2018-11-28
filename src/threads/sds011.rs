@@ -218,15 +218,15 @@ impl Sds011 {
                 if counter >= 300 {
                     debug!("2.5 Queue: {:?}", pm2_5_queue);
                     let mut sum: i32 = 0;
-                    for val in pm2_5_queue.iter() {
-                        sum = sum + *val;
+                    for val in &pm2_5_queue {
+                        sum = sum + val;
                     }
                     let pm2_5 = sum / pm2_5_queue.len() as i32;
 
                     debug!("10 Queue: {:?}", pm10_queue);
                     let mut sum: i32 = 0;
-                    for val in pm10_queue.iter() {
-                        sum = sum + *val;
+                    for val in &pm10_queue {
+                        sum = sum + val;
                     }
                     let pm10 = sum / pm10_queue.len() as i32;
 

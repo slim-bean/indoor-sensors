@@ -50,7 +50,6 @@ fn main() {
 
     //FIXME instead of unrwapping all of these we could check for errors so the progam can run missing a sensor
     let bmp280 = Bmp280::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex)).unwrap();
-
     let humidity_mutex = Arc::new(Mutex::new((NAN,NAN)));
     let htu21d = Htu21d::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex), Arc::clone(&humidity_mutex)).unwrap();
     let sgp30 = Sgp30::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex), Arc::clone(&humidity_mutex)).unwrap();
@@ -63,8 +62,6 @@ fn main() {
     Geiger::start_thread(geiger);
     Sds011::start_thread(sds011);
 
-    //TODO Average values in SGP30
-    //TODO Save baseline from SGP30
     //TODO Average temp/humidity values?
 
     info!("Connecting to MQ");
@@ -72,6 +69,12 @@ fn main() {
     m.connect("localhost", 1883).unwrap();
 
     for received in receiver {
+
+        if received.queue == "poison" && received.bytes == "poison" {
+            error!("One of our threads panicked holding the I2C lock and poisoned it, killing the app");
+            panic!("One of our threads panicked holding the I2C lock and poisoned it, killing the app");
+        }
+
         info!("Sending Message to '{}' payload '{}'", received.queue, received.bytes);
         send_to_topic(&m, &received.queue, &received.bytes.as_bytes());
     }

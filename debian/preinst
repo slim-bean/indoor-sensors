@@ -5,3 +5,4 @@ set -e
 
 mkdir -p /var/log/indoor_sensors
 mkdir -p /etc/indoor_sensors
+mkdir -p /var/lib/indoor_sensors
