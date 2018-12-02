@@ -100,8 +100,9 @@ impl Sgp30 {
         if co2_path.exists() && tvoc_path.exists() {
             let co2_val = fs::read_to_string(co2_path)?;
             let tvoc_val = fs::read_to_string(tvoc_path)?;
-            let co2_u16 = co2_val.parse::<u16>()?;
-            let tvoc_u16 = tvoc_val.parse::<u16>()?;
+            debug!("Read raw string values of CO2: '{}' and TVOC: '{}'", co2_val, tvoc_val);
+            let co2_u16 = co2_val.trim().parse::<u16>()?;
+            let tvoc_u16 = tvoc_val.trim().parse::<u16>()?;
 
             let baseline = Baseline{
                 co2eq: co2_u16,
@@ -177,18 +178,18 @@ impl Sgp30 {
                     debug!("CO2 Vals: {:?}", co2_queue);
                     debug!("VOC Vals: {:?}", voc_queue);
 
-                    let mut sum = 0;
+                    let mut sum = 0u32;
                     for val in &co2_queue{
-                        sum = sum + val;
+                        sum = sum + *val as u32;
                     }
-                    let co2_avg = sum / co2_queue.len() as u16;
+                    let co2_avg = sum / co2_queue.len() as u32;
 
-                    let mut sum = 0;
+                    let mut sum = 0u32;
                     for val in &voc_queue{
-                        sum = sum + val;
+                        sum = sum + *val as u32;
                     }
 
-                    let voc_avg = sum / voc_queue.len() as u16;
+                    let voc_avg = sum / voc_queue.len() as u32;
 
                     let temp_val = SensorValue {
                         id: 52,

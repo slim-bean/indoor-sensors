@@ -10,7 +10,7 @@ chrono = "0.4.4"
 
 sensor_lib = { path = "../sensor_lib" }
 htu21d = { path = "../htu21d" }
-sgp30 = "0.2.0"
+sgp30 = { path = "../sgp30-rs" }
 bme280 = "0.1.1"
 embedded-hal = "0.2.1"
 linux-embedded-hal = "0.2.0"
