@@ -2,7 +2,7 @@
 
 #[macro_use]
 extern crate log;
-extern crate fern;
+extern crate log4rs;
 extern crate chrono;
 
 extern crate embedded_hal as hal;
@@ -24,6 +24,7 @@ extern crate serial;
 use std::sync::{Arc,Mutex};
 use std::sync::mpsc;
 use std::f32::NAN;
+use std::path::Path;
 
 use mosquitto_client::Mosquitto;
 
@@ -41,7 +42,14 @@ pub struct Payload {
 }
 
 fn main() {
-    setup_logger().unwrap();
+    //Check if there is a logging config configured in /etc if not just use one local to the app
+    let etc_config = Path::new("/etc/indoor_sensors/log4rs.yml");
+    let log_config_path = if let true = etc_config.exists() {
+        etc_config
+    } else {
+        Path::new("log4rs.yml")
+    };
+    log4rs::init_file(log_config_path, Default::default()).expect("Failed to init logger");
     info!("Starting indoor_sensors");
 
 
@@ -98,40 +106,4 @@ fn send_to_topic(m: &Mosquitto, topic: &str, payload: &[u8]) {
             }
         };
     }
-}
-
-fn setup_logger() -> Result<(), fern::InitError> {
-    let base = fern::Dispatch::new();
-
-    let std = fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "{}[{}][{}] {}",
-                chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
-                record.target(),
-                record.level(),
-                message
-            ))
-        })
-        .level(log::LevelFilter::Info)
-//        .level_for("rfm69_to_mq::reliable_datagram", log::LevelFilter::Debug)
-        .chain(std::io::stdout())
-        .chain(fern::log_file("indoor_sensors.log")?);
-
-    let debug = fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "{}[{}][{}] {}",
-                chrono::Local::now().format("[%Y-%m-%d][%H:%M:%S]"),
-                record.target(),
-                record.level(),
-                message
-            ))
-        })
-        .level(log::LevelFilter::Debug)
-        .chain(fern::log_file("indoor_sensors_debug.log")?);
-
-    base.chain(std).chain(debug).apply()?;
-
-    Ok(())
 }

@@ -5,7 +5,7 @@ authors = ["Edward Welch <ed@oqqer.com>"]
 
 [dependencies]
 log = "0.4.3"
-fern = "0.5.6"
+log4rs = "0.8.1"
 chrono = "0.4.4"
 
 sensor_lib = { path = "../sensor_lib" }
@@ -36,6 +36,7 @@ maintainer-scripts = "debian"
 assets = [
     ["target/release/indoor_sensors", "usr/bin/", "755"],
     ["systemd/indoor_sensors.service", "/lib/systemd/system/indoor_sensors.service", "644"],
+    ["log4rs.yml", "/etc/indoor_sensors/log4rs.yml", "644"],
     #NOTE this is a submodule! if you cloned this project and can't find this file run git submodule init
     ["sensor_lib/sensors/sensors.yml", "/etc/indoor_sensors/sensors.yml", "644"],
 ]
