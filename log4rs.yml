@@ -10,7 +10,7 @@ appenders:
         level: info
     encoder:
       kind: pattern
-      pattern: "{d} [{t}] {m}{n}"
+      pattern: "{l} [{t}] {m}{n}"
   file_info:
     kind: rolling_file
     path: "output.log"
@@ -20,7 +20,7 @@ appenders:
         level: info
     encoder:
       kind: pattern
-      pattern: "{d} [{t}] {m}{n}"
+      pattern: "{d} {l} [{t}] {m}{n}"
     policy:
       kind: compound
       trigger:
@@ -40,7 +40,7 @@ appenders:
         level: debug
     encoder:
       kind: pattern
-      pattern: "{d} [{t}] {m}{n}"
+      pattern: "{d} {l} [{t}] {m}{n}"
     policy:
       kind: compound
       trigger:

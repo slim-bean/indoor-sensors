@@ -89,7 +89,7 @@ fn main() {
 }
 
 fn send_to_topic(m: &Mosquitto, topic: &str, payload: &[u8]) {
-    for i in 1..5 {
+    for i in 1..6 {
         match m.publish_wait(topic, payload, 2, false, 1000) {
             Ok(id) => {
                 debug!("Message {} published successfully to {} after {} attempts", id, topic, i);
@@ -99,9 +99,10 @@ fn send_to_topic(m: &Mosquitto, topic: &str, payload: &[u8]) {
                 break;
             }
             Err(e) => {
-                warn!("Failed to enqueue data: {} to topic {}, will retry {} more times", e, topic, 5 - i);
+                debug!("Failed to enqueue data: {} to topic {}, will retry {} more times", e, topic, 5 - i);
                 if i == 5 {
                     error!("Failed to enqueue message after 5 tries to topic {}, it will be dropped", topic);
+                    panic!("Failed to enqueue message after 5 tries to topic {}, it will be dropped", topic);
                 }
             }
         };
