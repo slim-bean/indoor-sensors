@@ -17,6 +17,8 @@ linux-embedded-hal = "0.2.0"
 
 serial = "0.4"
 
+mio_httpc = "0.8.2"
+
 mosquitto-client = "0.1.4"
 
 serde = "1.0.70"

@@ -21,6 +21,8 @@ extern crate sensor_lib;
 
 extern crate serial;
 
+extern crate mio_httpc;
+
 use std::sync::{Arc,Mutex};
 use std::sync::mpsc;
 use std::f32::NAN;
@@ -34,6 +36,7 @@ use threads::htu21d::Htu21d;
 use threads::sgp30::Sgp30;
 use threads::geiger::Geiger;
 use threads::sds011::Sds011;
+use threads::radiothermostat::RadioThermostat;
 
 
 pub struct Payload {
@@ -63,12 +66,14 @@ fn main() {
     let sgp30 = Sgp30::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex), Arc::clone(&humidity_mutex)).unwrap();
     let geiger = Geiger::new(mpsc::Sender::clone(&sender)).unwrap();
     let sds011 = Sds011::new(mpsc::Sender::clone(&sender)).unwrap();
+    let thermostat = RadioThermostat::new(mpsc::Sender::clone(&sender)).unwrap();
 
     Bmp280::start_thread(bmp280);
     Htu21d::start_thread(htu21d);
     Sgp30::start_thread(sgp30);
     Geiger::start_thread(geiger);
     Sds011::start_thread(sds011);
+    RadioThermostat::start_thread(thermostat);
 
     //TODO Average temp/humidity values?
 
