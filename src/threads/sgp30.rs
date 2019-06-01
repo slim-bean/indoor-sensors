@@ -1,7 +1,7 @@
-use std::fmt::{Display,Formatter};
+use std::fmt::{Display, Formatter};
 
 use std::sync::mpsc::Sender;
-use std::sync::{Arc,Mutex};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::SystemTime;
 use std::time::Duration;
@@ -42,17 +42,17 @@ impl From<SgpError<LinuxI2CError>> for Error {
                 Error {
                     message: format!("SGP30 I2C Error: {}", i2c_error),
                 }
-            },
+            }
             SgpError::Crc => {
                 Error {
                     message: String::from("CRC Error"),
                 }
-            },
+            }
             SgpError::NotInitialized => {
                 Error {
                     message: String::from("Not Initialized"),
                 }
-            },
+            }
         }
     }
 }
@@ -83,11 +83,11 @@ pub struct Sgp30 {
     sender: Sender<Payload>,
     lock: Arc<Mutex<i32>>,
     sgp30: Sgp<I2cdev, Delay>,
-    humidity_mutex: Arc<Mutex<(f32,f32)>>,
+    humidity_mutex: Arc<Mutex<(f32, f32)>>,
 }
 
 impl Sgp30 {
-    pub fn new(sender: Sender<Payload>, lock: Arc<Mutex<i32>>, humidity_mutex: Arc<Mutex<(f32,f32)>>,) -> Result<Sgp30, Error> {
+    pub fn new(sender: Sender<Payload>, lock: Arc<Mutex<i32>>, humidity_mutex: Arc<Mutex<(f32, f32)>>) -> Result<Sgp30, Error> {
         info!("Create and Init SGP30");
         let dev2 = I2cdev::new("/dev/i2c-1")?;
         let address = 0x58;
@@ -98,20 +98,19 @@ impl Sgp30 {
         let tvoc_path = Path::new("/var/lib/indoor_sensors/sgp30_tvoc.txt");
 
         if co2_path.exists() && tvoc_path.exists() {
-            match read_baseline() {
+            match read_baseline(&co2_path, &tvoc_path) {
                 Ok(baseline) => {
                     sgp30.set_baseline(&baseline)?;
-                },
+                }
                 Err(err) => {
                     error!("Failed to read existing baseline values for SGP30: {}, no baseline will be used", err)
-                },
+                }
             }
-
         } else {
             info!("No existing baseline files found for SGP30, no baseline will be used")
         }
 
-        Ok(Sgp30{
+        Ok(Sgp30 {
             sender,
             lock,
             sgp30,
@@ -119,7 +118,7 @@ impl Sgp30 {
         })
     }
 
-    pub fn start_thread(mut sgp: Sgp30){
+    pub fn start_thread(mut sgp: Sgp30) {
         thread::spawn(move || {
             info!("Started SGP30 Thread");
             let mut counter = 1;
@@ -145,19 +144,19 @@ impl Sgp30 {
                         match sgp.sgp30.measure() {
                             Ok(val) => {
                                 measurement = Some(val);
-                            },
+                            }
                             Err(err) => {
                                 error!("Failed to read from SGP30: {:?}", err);
-                            },
+                            }
                         }
-                    },
+                    }
                     Err(_) => {
                         error!("The lock has been poisoned, sending a poison message to kill the app");
-                        sgp.sender.send(Payload{
+                        sgp.sender.send(Payload {
                             queue: String::from("poison"),
-                            bytes: String::from("poison")
+                            bytes: String::from("poison"),
                         }).unwrap(); //We don't really care anymore if this thread panics
-                    },
+                    }
                 }
 
                 if let Some(meas) = measurement {
@@ -173,18 +172,17 @@ impl Sgp30 {
 
                 //Even though we read the value once a second, only send it once a minute
                 if counter >= 60 {
-
                     debug!("CO2 Vals: {:?}", co2_queue);
                     debug!("VOC Vals: {:?}", voc_queue);
 
                     let mut sum = 0u32;
-                    for val in &co2_queue{
+                    for val in &co2_queue {
                         sum = sum + *val as u32;
                     }
                     let co2_avg = sum / co2_queue.len() as u32;
 
                     let mut sum = 0u32;
-                    for val in &voc_queue{
+                    for val in &voc_queue {
                         sum = sum + *val as u32;
                     }
 
@@ -202,10 +200,10 @@ impl Sgp30 {
                                 queue: String::from("/ws/2/grp/generic"),
                                 bytes: val,
                             }) {
-                                Ok(_) => {},
+                                Ok(_) => {}
                                 Err(err) => {
                                     error!("Failed to send message to main thread: {}", err);
-                                },
+                                }
                             }
                         }
                         Err(err) => {
@@ -227,10 +225,10 @@ impl Sgp30 {
                                 queue: String::from("/ws/2/grp/generic"),
                                 bytes: val,
                             }) {
-                                Ok(_) => {},
+                                Ok(_) => {}
                                 Err(err) => {
                                     error!("Failed to send message to main thread: {}", err);
-                                },
+                                }
                             }
                         }
                         Err(err) => {
@@ -239,44 +237,42 @@ impl Sgp30 {
                     };
 
 
-
-
                     //Update the humidity value for the next set of readings:
                     //This equation for absolute humidity comes from: https://carnotcycle.wordpress.com/2012/08/04/how-to-convert-relative-humidity-to-absolute-humidity/
                     let mut temp = NAN;
                     let mut humidity = NAN;
-                    match sgp.humidity_mutex.lock(){
+                    match sgp.humidity_mutex.lock() {
                         Ok(mut_val) => {
                             temp = mut_val.0;
                             humidity = mut_val.1;
-                        },
-                        Err(_) => {},
+                        }
+                        Err(_) => {}
                     }
 
                     if !temp.is_nan() && !humidity.is_nan() {
-                        let abs_humidity = (6.112 * E.powf(((17.67 * temp)/(temp+243.5)) as f64) as f32 * humidity * 2.1674) as f32 /(273.15+temp);
-                         match Humidity::from_f32(abs_humidity){
-                             Ok(sgp30_humidity) => {
-                                 match sgp.lock.lock() {
-                                     Ok(_) => {
-                                         match sgp.sgp30.set_humidity(Some(&sgp30_humidity)) {
-                                             Ok(_) => {
-                                                 debug!("Set SGP abs humidity to: {} from a temp val of {} and humidity val of {}", abs_humidity, temp, humidity);
-                                             },
-                                             Err(err) => {
-                                                 error!("Failed to update the humidity value of the sgp30: {:?}", err);
-                                             },
-                                         }
-                                     },
-                                     Err(_) => {
-                                         //I'm ignoring this lock failure because we will catch it above if the lock is poisoned
-                                     },
-                                 }
-                             },
-                             Err(err) => {
-                                 error!("Failed to create a humidity value for SGP30: {:?}", err);
-                             },
-                         }
+                        let abs_humidity = (6.112 * E.powf(((17.67 * temp) / (temp + 243.5)) as f64) as f32 * humidity * 2.1674) as f32 / (273.15 + temp);
+                        match Humidity::from_f32(abs_humidity) {
+                            Ok(sgp30_humidity) => {
+                                match sgp.lock.lock() {
+                                    Ok(_) => {
+                                        match sgp.sgp30.set_humidity(Some(&sgp30_humidity)) {
+                                            Ok(_) => {
+                                                debug!("Set SGP abs humidity to: {} from a temp val of {} and humidity val of {}", abs_humidity, temp, humidity);
+                                            }
+                                            Err(err) => {
+                                                error!("Failed to update the humidity value of the sgp30: {:?}", err);
+                                            }
+                                        }
+                                    }
+                                    Err(_) => {
+                                        //I'm ignoring this lock failure because we will catch it above if the lock is poisoned
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                error!("Failed to create a humidity value for SGP30: {:?}", err);
+                            }
+                        }
                     }
 
                     //Save off the baseline data:
@@ -286,29 +282,29 @@ impl Sgp30 {
                             match sgp.sgp30.get_baseline() {
                                 Ok(incoming_baseline) => {
                                     baseline = Some(incoming_baseline);
-                                },
+                                }
                                 Err(err) => {
                                     error!("Failed to read the baseline data from the sgp30: {:?}", err);
-                                },
+                                }
                             }
-                        },
+                        }
                         Err(_) => {
                             //I'm ignoring this lock failure because we will catch it above if the lock is poisoned
-                        },
+                        }
                     }
 
                     if let Some(base) = baseline {
-                        match fs::write("/var/lib/indoor_sensors/sgp30_co2.txt", base.co2eq.to_string()){
-                            Ok(_) => {},
+                        match fs::write("/var/lib/indoor_sensors/sgp30_co2.txt", base.co2eq.to_string()) {
+                            Ok(_) => {}
                             Err(err) => {
                                 error!("Failed to save sgp30 baseline to a file: {}", err);
-                            },
+                            }
                         }
-                        match fs::write("/var/lib/indoor_sensors/sgp30_tvoc.txt", base.tvoc.to_string()){
-                            Ok(_) => {},
+                        match fs::write("/var/lib/indoor_sensors/sgp30_tvoc.txt", base.tvoc.to_string()) {
+                            Ok(_) => {}
                             Err(err) => {
                                 error!("Failed to save sgp30 baseline to a file: {}", err);
-                            },
+                            }
                         }
                         debug!("Saved CO2 baseline of {} and TVOC baseline of {}", base.co2eq, base.tvoc);
                     }
@@ -321,14 +317,14 @@ impl Sgp30 {
     }
 }
 
-fn read_baseline() -> Result<Baseline, Error> {
+fn read_baseline(co2_path: &Path, tvoc_path: &Path) -> Result<Baseline, Error> {
     let co2_val = fs::read_to_string(co2_path)?;
     let tvoc_val = fs::read_to_string(tvoc_path)?;
     debug!("Read raw string values of CO2: '{}' and TVOC: '{}'", co2_val, tvoc_val);
     let co2_u16 = co2_val.trim().parse::<u16>()?;
     let tvoc_u16 = tvoc_val.trim().parse::<u16>()?;
 
-    let baseline = Baseline{
+    let baseline = Baseline {
         co2eq: co2_u16,
         tvoc: tvoc_u16,
     };
