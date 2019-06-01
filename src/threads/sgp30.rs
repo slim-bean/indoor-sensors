@@ -98,18 +98,17 @@ impl Sgp30 {
         let tvoc_path = Path::new("/var/lib/indoor_sensors/sgp30_tvoc.txt");
 
         if co2_path.exists() && tvoc_path.exists() {
-            let co2_val = fs::read_to_string(co2_path)?;
-            let tvoc_val = fs::read_to_string(tvoc_path)?;
-            debug!("Read raw string values of CO2: '{}' and TVOC: '{}'", co2_val, tvoc_val);
-            let co2_u16 = co2_val.trim().parse::<u16>()?;
-            let tvoc_u16 = tvoc_val.trim().parse::<u16>()?;
+            match read_baseline() {
+                Ok(baseline) => {
+                    sgp30.set_baseline(&baseline)?;
+                },
+                Err(err) => {
+                    error!("Failed to read existing baseline values for SGP30: {}, no baseline will be used", err)
+                },
+            }
 
-            let baseline = Baseline{
-                co2eq: co2_u16,
-                tvoc: tvoc_u16,
-            };
-            info!("Found baseline values for SGP30, CO2: {}, TVOC: {}", co2_u16, tvoc_u16);
-            sgp30.set_baseline(&baseline)?;
+        } else {
+            info!("No existing baseline files found for SGP30, no baseline will be used")
         }
 
         Ok(Sgp30{
@@ -320,4 +319,19 @@ impl Sgp30 {
             }
         });
     }
+}
+
+fn read_baseline() -> Result<Baseline, Error> {
+    let co2_val = fs::read_to_string(co2_path)?;
+    let tvoc_val = fs::read_to_string(tvoc_path)?;
+    debug!("Read raw string values of CO2: '{}' and TVOC: '{}'", co2_val, tvoc_val);
+    let co2_u16 = co2_val.trim().parse::<u16>()?;
+    let tvoc_u16 = tvoc_val.trim().parse::<u16>()?;
+
+    let baseline = Baseline{
+        co2eq: co2_u16,
+        tvoc: tvoc_u16,
+    };
+    info!("Found baseline values for SGP30, CO2: {}, TVOC: {}", co2_u16, tvoc_u16);
+    Ok(baseline)
 }
