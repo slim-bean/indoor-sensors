@@ -1,3 +1,1 @@
-[submodule "sensor_lib"]
-	path = sensor_lib
-	url = git@gitlab.com:slim-bean/sensor_lib.git
+
