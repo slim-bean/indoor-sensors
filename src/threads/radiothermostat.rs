@@ -73,6 +73,6 @@ impl RadioThermostat {
 }
 
 fn query_thermostat() -> Result<Vec<u8>, MioError> {
-    let (response_meta, body) = CallBuilder::get().timeout_ms(10000).url("http://172.20.31.30/tstat")?.exec()?;
+    let (response_meta, body) = CallBuilder::get().timeout_ms(20000).url("http://172.20.30.30/tstat")?.exec()?;
     Ok(body)
 }
