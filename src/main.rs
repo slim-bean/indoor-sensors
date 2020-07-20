@@ -1,4 +1,3 @@
-#![feature(duration_as_u128)]
 
 #[macro_use]
 extern crate log;
@@ -19,6 +18,9 @@ extern crate sgp30;
 extern crate bme280;
 extern crate sensor_lib;
 
+extern crate rppal;
+extern crate as3935;
+
 extern crate serial;
 
 extern crate mio_httpc;
@@ -37,6 +39,7 @@ use threads::sgp30::Sgp30;
 use threads::geiger::Geiger;
 use threads::sds011::Sds011;
 use threads::radiothermostat::RadioThermostat;
+use threads::as3935::As3935;
 
 
 pub struct Payload {
@@ -67,6 +70,7 @@ fn main() {
     let geiger = Geiger::new(mpsc::Sender::clone(&sender)).unwrap();
     let sds011 = Sds011::new(mpsc::Sender::clone(&sender)).unwrap();
     let thermostat = RadioThermostat::new(mpsc::Sender::clone(&sender)).unwrap();
+    let lightning_sensor = As3935::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex)).unwrap();
 
     Bmp280::start_thread(bmp280);
     Htu21d::start_thread(htu21d);
@@ -74,6 +78,7 @@ fn main() {
     Geiger::start_thread(geiger);
     Sds011::start_thread(sds011);
     RadioThermostat::start_thread(thermostat);
+    As3935::start_thread(lightning_sensor);
 
     //TODO Average temp/humidity values?
 

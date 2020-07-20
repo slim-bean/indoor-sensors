@@ -14,6 +14,8 @@ sgp30 = "0.2.1"
 bme280 = "0.1.1"
 embedded-hal = "0.2.1"
 linux-embedded-hal = "0.2.0"
+as3935 = { path = "../as3935-rs"}
+rppal = "0.11.3"
 
 serial = "0.4"
 
@@ -40,3 +42,7 @@ assets = [
     ["systemd/indoor_sensors.service", "/lib/systemd/system/indoor_sensors.service", "644"],
     ["log4rs.yml", "/etc/indoor_sensors/log4rs.yml", "644"],
 ]
+
+[patch.crates-io]
+# https://github.com/golemparts/rppal/pull/33
+rppal = { git = "https://github.com/golemparts/rppal.git" }
