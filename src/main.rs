@@ -71,6 +71,7 @@ fn main() {
     let sds011 = Sds011::new(mpsc::Sender::clone(&sender)).unwrap();
     let thermostat = RadioThermostat::new(mpsc::Sender::clone(&sender)).unwrap();
     let lightning_sensor = As3935::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex)).unwrap();
+    
 
     Bmp280::start_thread(bmp280);
     Htu21d::start_thread(htu21d);

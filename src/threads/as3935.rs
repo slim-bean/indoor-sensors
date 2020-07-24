@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use rppal::gpio::Gpio;
 use rppal::i2c::I2c;
+use rppal::gpio::{InputPin, Level, Trigger};
 
 use as3935::interface::i2c::I2cAddress;
 use as3935::{
@@ -24,13 +25,13 @@ pub struct As3935 {
 
 impl As3935 {
     pub fn new(sender: Sender<Payload>, lock: Arc<Mutex<i32>>) -> Result<As3935, Error> {
-        info!("Create and Init HTU21Df");
+        info!("Create and Init As3935");
 
         let gpio = Gpio::new().unwrap();
 
         let as3935 = AS3935::new(
             InterfaceSelection::I2c(I2c::with_bus(1).unwrap(), I2cAddress::default()),
-            gpio.get(23).unwrap().into_input(),
+            gpio.get(6).unwrap().into_input(),
             lock,
         )
         .unwrap();
@@ -48,7 +49,7 @@ impl As3935 {
                 ListeningParameters::default()
                     .with_sensor_placing(SensorPlacing::Indoor)
                     .with_signal_verification_threshold(
-                        SignalVerificationThreshold::new(2).unwrap(),
+                        SignalVerificationThreshold::new(0).unwrap(),
                     ),
             )
             .unwrap();
