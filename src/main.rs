@@ -1,4 +1,3 @@
-
 #[macro_use]
 extern crate log;
 extern crate log4rs;
@@ -25,7 +24,7 @@ extern crate serial;
 
 extern crate mio_httpc;
 
-use std::sync::{Arc,Mutex};
+use std::sync::{Arc, Mutex};
 use std::sync::mpsc;
 use std::f32::NAN;
 use std::path::Path;
@@ -33,7 +32,8 @@ use std::path::Path;
 use mosquitto_client::Mosquitto;
 
 mod threads;
-use threads::bmp280::Bmp280;
+
+use threads::bmp280::{Bmp280, Error};
 use threads::htu21d::Htu21d;
 use threads::sgp30::Sgp30;
 use threads::geiger::Geiger;
@@ -44,7 +44,7 @@ use threads::as3935::As3935;
 
 pub struct Payload {
     queue: String,
-    bytes: String
+    bytes: String,
 }
 
 fn main() {
@@ -63,23 +63,58 @@ fn main() {
     let i2c_mutex = Arc::new(Mutex::new(0i32));
 
     //FIXME instead of unrwapping all of these we could check for errors so the progam can run missing a sensor
-    let bmp280 = Bmp280::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex)).unwrap();
-    let humidity_mutex = Arc::new(Mutex::new((NAN,NAN)));
-    let htu21d = Htu21d::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex), Arc::clone(&humidity_mutex)).unwrap();
-    let sgp30 = Sgp30::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex), Arc::clone(&humidity_mutex)).unwrap();
-    let geiger = Geiger::new(mpsc::Sender::clone(&sender)).unwrap();
-    let sds011 = Sds011::new(mpsc::Sender::clone(&sender)).unwrap();
-    let thermostat = RadioThermostat::new(mpsc::Sender::clone(&sender)).unwrap();
-    let lightning_sensor = As3935::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex)).unwrap();
-    
+    match Bmp280::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex)) {
+        Ok(bme280) => {
+            Bmp280::start_thread(bme280);
+        }
+        Err(err) => {
+            error!("Failed to create bmp280: {}", err)
+        }
+    };
+    let humidity_mutex = Arc::new(Mutex::new((NAN, NAN)));
+    match Htu21d::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex), Arc::clone(&humidity_mutex)) {
+        Ok(htu21d) => {
+            Htu21d::start_thread(htu21d);
+        }
+        Err(err) => {
+            error!("Failed to create bmp280: {}", err)
+        }
+    }
+    match Sgp30::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex), Arc::clone(&humidity_mutex)) {
+        Ok(sgp30) => {
+            Sgp30::start_thread(sgp30);
+        }
+        Err(err) => {
+            error!("Failed to create sgp30: {}", err)
+        }
+    }
+    match Geiger::new(mpsc::Sender::clone(&sender)) {
+        Ok(geiger) => {
+            Geiger::start_thread(geiger);
+        }
+        Err(err) => {
+            error!("Failed to create geiger: {}", err)
+        }
+    }
+    match Sds011::new(mpsc::Sender::clone(&sender)) {
+        Ok(sds011) => {
+            Sds011::start_thread(sds011);
+        }
+        Err(err) => {
+            error!("Failed to create sds011: {}", err)
+        }
+    }
+    match RadioThermostat::new(mpsc::Sender::clone(&sender)) {
+        Ok(rt) => {
+            RadioThermostat::start_thread(rt);
+        }
+        Err(err) => {
+            error!("Failed to create radio thermostat: {}", err)
+        }
+    }
 
-    Bmp280::start_thread(bmp280);
-    Htu21d::start_thread(htu21d);
-    Sgp30::start_thread(sgp30);
-    Geiger::start_thread(geiger);
-    Sds011::start_thread(sds011);
-    RadioThermostat::start_thread(thermostat);
-    As3935::start_thread(lightning_sensor);
+    //let lightning_sensor = As3935::new(mpsc::Sender::clone(&sender), Arc::clone(&i2c_mutex)).unwrap();
+    //As3935::start_thread(lightning_sensor);
 
     //TODO Average temp/humidity values?
 
@@ -88,7 +123,6 @@ fn main() {
     m.connect("localhost", 1883).unwrap();
 
     for received in receiver {
-
         if received.queue == "poison" && received.bytes == "poison" {
             error!("One of our threads panicked holding the I2C lock and poisoned it, killing the app");
             panic!("One of our threads panicked holding the I2C lock and poisoned it, killing the app");

@@ -10,11 +10,17 @@ use mio_httpc::CallBuilder;
 use mio_httpc::Error as MioError;
 
 use sensor_lib::ThermostatValue;
-
+use std::fmt::{Display,Formatter};
 
 #[derive(Debug)]
 pub struct Error {
     message: String,
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), std::fmt::Error> {
+        write!(f, "{}", self.message)
+    }
 }
 
 pub struct RadioThermostat {
